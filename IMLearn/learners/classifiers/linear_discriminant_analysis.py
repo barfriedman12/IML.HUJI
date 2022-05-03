@@ -1,6 +1,7 @@
 from typing import NoReturn
-from ...base import BaseEstimator
+from IMLearn.base import BaseEstimator
 import numpy as np
+from IMLearn.metrics import loss_functions
 from numpy.linalg import det, inv
 
 
@@ -23,8 +24,9 @@ class LDA(BaseEstimator):
         The inverse of the estimated features covariance. To be set in `LDA.fit`
 
     self.pi_: np.ndarray of shape (n_classes)
-        The estimated class probabilities. To be set in `GaussianNaiveBayes.fit`
+        The estimated class probabilities. To be set in `LDA.fit`
     """
+
     def __init__(self):
         """
         Instantiate an LDA classifier
@@ -46,7 +48,37 @@ class LDA(BaseEstimator):
         y : ndarray of shape (n_samples, )
             Responses of input data to fit to
         """
-        raise NotImplementedError()
+        self.classes_, n_k_vec = np.unique(y, return_counts=True)
+        n_classes, n_samples, n_features = self.classes_.shape[0], X.shape[0], X.shape[1]
+
+        self.mu_ = np.zeros((n_classes, n_features))
+        # calculate mu_hat
+
+        for k in range(n_classes):
+            sum_vec_k = np.zeros((n_features,))
+            for i in range(n_samples):
+                if y[i] == self.classes_[k]:
+                    sum_vec_k = X[i, :] + sum_vec_k
+                    # sum_vec_k = np.sum(X[i, :], sum_vec_k)
+            n_k_vec_k = n_k_vec[1]
+            self.mu_[k] = sum_vec_k / n_k_vec[k]
+        # calculate cov_matrix, unbiased
+        # mu_by_samples = self.mu_[indices]
+        self.cov_ = np.zeros((n_features, n_features))
+        for k in range(n_classes):
+            classes_k = self.classes_[k]
+            indices_of_cur_class_in_X = np.where(y == self.classes_[k])
+            for i in indices_of_cur_class_in_X[0]:
+                x_i = X[i, :]
+                mu_k = self.mu_[k]
+                add_to_cov_sum = (np.array([(x_i - self.mu_[k])]).T @ np.array([(x_i - self.mu_[k])]))
+                self.cov_ += add_to_cov_sum
+
+        self.cov_ = self.cov_ / (n_samples - n_classes)
+        # calculate cov^-1
+        self._cov_inv = inv(self.cov_)
+        # calculate pi
+        self.pi_ = n_k_vec / n_samples
 
     def _predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -62,7 +94,8 @@ class LDA(BaseEstimator):
         responses : ndarray of shape (n_samples, )
             Predicted responses of given samples
         """
-        raise NotImplementedError()
+
+        return np.argmax(self.likelihood(X), axis=1)
 
     def likelihood(self, X: np.ndarray) -> np.ndarray:
         """
@@ -79,15 +112,29 @@ class LDA(BaseEstimator):
             The likelihood for each sample under each of the classes
 
         """
+        # given n samples in X, for each sample i we want to calculate the
+        # probability for y to be in some class k, for every class k
         if not self.fitted_:
             raise ValueError("Estimator must first be fitted before calling `likelihood` function")
+        n_samples, n_features, n_classes = X.shape[0], X.shape[1], self.classes_.shape[0]
+        likelihoods = np.zeros((n_samples, n_classes))
+        const = 1/ (np.sqrt(det(self.cov_)* (2*np.pi)**n_features))
+        for i in range(n_samples):
+            x_i = X[i, :]
+            for k in range(n_classes):
+                x_i_mu_k = np.array([(x_i - self.mu_[k])])
+                fase = np.array([(x_i - self.mu_[k])]) @ self._cov_inv
+                exp = -0.5 * ((np.array([(x_i - self.mu_[k])]) @ self._cov_inv @ np.array([(x_i - self.mu_[k])]).T))
+                pi_k = self.pi_[k]
 
-        raise NotImplementedError()
+                likelihoods[i,k] = const * np.exp(exp) * self.pi_[k]
+        return likelihoods
+
+
 
     def _loss(self, X: np.ndarray, y: np.ndarray) -> float:
         """
         Evaluate performance under misclassification loss function
-
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features)
@@ -101,4 +148,6 @@ class LDA(BaseEstimator):
         loss : float
             Performance under missclassification loss function
         """
-        raise NotImplementedError()
+        y_pred = self.predict(X)
+        loss = loss_functions.misclassification_error(y, y_pred)
+        return loss
